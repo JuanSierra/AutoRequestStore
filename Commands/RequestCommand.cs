@@ -5,11 +5,13 @@ using CliFx.Infrastructure;
 using CSJsonDB;
 using GraphQL;
 using GraphQL.Client.Abstractions;
+using GraphQL.Client.Http;
+using GraphQL.Client.Serializer.SystemTextJson;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using System.Dynamic;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace AutoRequestStore.Commands
 {
@@ -18,7 +20,7 @@ namespace AutoRequestStore.Commands
     {
         public RequestCommand(IOptions<ConnectionSettings> connection)
         {
-            Console.Out.WriteLine(connection.Value.Endpoint);
+            _client = new GraphQLHttpClient(connection.Value.Endpoint, new SystemTextJsonSerializer());
         }
 
         //[CommandParameter(0, Description = "Value whose logarithm is to be found.")]
@@ -28,6 +30,11 @@ namespace AutoRequestStore.Commands
         // Short name: -i
         [CommandOption("interval", 'i', Description = "Interval in milliseconds.")]
         public double Interval { get; init; } = 1000;
+
+        // Name: --name
+        // Short name: -n
+        [CommandOption("name", 'n', Description = "Output file name.")]
+        public string Name { get; init; }
 
         private string baseQuery2 = @"
             query allPeople {
@@ -54,7 +61,6 @@ namespace AutoRequestStore.Commands
             var rootNode = Converter.ParseNodesFromQuery(baseQuery2);
             var schema = Converter.BuildSchema(rootNode);
 
-
             var queryRequest = new GraphQLRequest(baseQuery2);
             var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
             resultList = Converter.GetResultList(graphQLResponse.Data, schema["children"].AsArray());
@@ -63,20 +69,36 @@ namespace AutoRequestStore.Commands
             console.Output.WriteLine("START SAVING...");
             console.Output.WriteLine(resultList.ToJsonString());
 
-            var db = JsonDB.Load("data.db");
+            var dbFile = CreateDataFile(rootNode);
+            var db = JsonDB.Load(dbFile);
 
-            //var i = 0;
             Stopwatch sw = new Stopwatch();
             sw.Start();
 
             foreach (var item in resultList)
             {
                 db.Add(rootNode.Name.StringValue, item);
-                db = JsonDB.Load("data.db");
+                db = JsonDB.Load(dbFile);
             }
 
             sw.Stop();
             console.Output.WriteLine(sw.ElapsedMilliseconds);
+        }
+
+        private string CreateDataFile(CommonNode node)
+        {
+            var collection = new JsonObject();
+            var stamp = DateTime.Now.ToString("yMMddHHmmss");
+            var fileName = Name ?? $"data_{stamp}.db";
+
+            collection.Add(node.Name.StringValue, new JsonArray());
+
+            using (var writer = File.CreateText(fileName)) 
+            {
+                writer.WriteLine(collection.ToJsonString());
+            }
+
+            return fileName;
         }
     }
 }

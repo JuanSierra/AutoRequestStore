@@ -10,7 +10,6 @@ var configuration = new ConfigurationBuilder()
 
 var services = new ServiceCollection();
 services.AddTransient<RequestCommand>();
-
 services.AddOptions<ConnectionSettings>().Bind(configuration.GetSection(ConnectionSettings.Section));
 
 var serviceProvider = services.BuildServiceProvider();
