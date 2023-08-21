@@ -21,6 +21,7 @@ namespace AutoRequestStore.Commands
         public RequestCommand(IOptions<ConnectionSettings> connection)
         {
             _client = new GraphQLHttpClient(connection.Value.Endpoint, new SystemTextJsonSerializer());
+            _baseQuery = connection.Value.Query;
         }
 
         //[CommandParameter(0, Description = "Value whose logarithm is to be found.")]
@@ -36,17 +37,7 @@ namespace AutoRequestStore.Commands
         [CommandOption("name", 'n', Description = "Output file name.")]
         public string Name { get; init; }
 
-        private string baseQuery2 = @"
-            query allPeople {
-                allPeople(first: 10) {
-                    edges {
-                        node {
-                            name
-                            gender
-                            }
-                    }
-                }
-            }";
+        private string _baseQuery;
         private readonly IGraphQLClient _client;
 
         public RequestCommand(IGraphQLClient client)
@@ -58,10 +49,10 @@ namespace AutoRequestStore.Commands
         {
             List<ExpandoObject> resultList = new List<ExpandoObject>();
 
-            var rootNode = Converter.ParseNodesFromQuery(baseQuery2);
+            var rootNode = Converter.ParseNodesFromQuery(_baseQuery);
             var schema = Converter.BuildSchema(rootNode);
 
-            var queryRequest = new GraphQLRequest(baseQuery2);
+            var queryRequest = new GraphQLRequest(_baseQuery);
             var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
             resultList = Converter.GetResultList(graphQLResponse.Data, schema["children"].AsArray());
 

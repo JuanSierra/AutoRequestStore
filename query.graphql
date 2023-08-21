@@ -1,0 +1,10 @@
+query allPeople {
+	allPeople(first: 10) {
+		edges {
+			node {
+				name
+				gender
+				}
+		}
+	}
+}
