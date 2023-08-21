@@ -8,10 +8,12 @@ using GraphQL.Client.Abstractions;
 using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.SystemTextJson;
 using Microsoft.Extensions.Options;
+using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using System.Dynamic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace AutoRequestStore.Commands
 {
@@ -21,7 +23,7 @@ namespace AutoRequestStore.Commands
         public RequestCommand(IOptions<ConnectionSettings> connection)
         {
             _client = new GraphQLHttpClient(connection.Value.Endpoint, new SystemTextJsonSerializer());
-            _baseQuery = connection.Value.Query;
+            _baseQuery = File.ReadAllText(connection.Value.Query);
         }
 
         //[CommandParameter(0, Description = "Value whose logarithm is to be found.")]
@@ -37,8 +39,20 @@ namespace AutoRequestStore.Commands
         [CommandOption("name", 'n', Description = "Output file name.")]
         public string Name { get; init; }
 
+        // Name: --start
+        // Short name: -s
+        [CommandOption("start", 's', Description = "Start value.")]
+        public string Start { get; init; }
+
+        // Name: --end
+        // Short name: -e
+        [CommandOption("end", 'e', Description = "End value.")]
+        public string End { get; init; }
+
+
         private string _baseQuery;
         private readonly IGraphQLClient _client;
+        private int _currentSequence = int.MinValue;
 
         public RequestCommand(IGraphQLClient client)
         {
@@ -48,32 +62,70 @@ namespace AutoRequestStore.Commands
         public async ValueTask ExecuteAsync(IConsole console)
         {
             List<ExpandoObject> resultList = new List<ExpandoObject>();
+            var firstRun = true;
+            string dbFile = null;
+            JObject db = null;
 
-            var rootNode = Converter.ParseNodesFromQuery(_baseQuery);
-            var schema = Converter.BuildSchema(rootNode);
-
-            var queryRequest = new GraphQLRequest(_baseQuery);
-            var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
-            resultList = Converter.GetResultList(graphQLResponse.Data, schema["children"].AsArray());
-
-            // SAVE TO JSON FILE
-            console.Output.WriteLine("START SAVING...");
-            console.Output.WriteLine(resultList.ToJsonString());
-
-            var dbFile = CreateDataFile(rootNode);
-            var db = JsonDB.Load(dbFile);
-
-            Stopwatch sw = new Stopwatch();
-            sw.Start();
-
-            foreach (var item in resultList)
+            while (HasRange() || firstRun) 
             {
-                db.Add(rootNode.Name.StringValue, item);
-                db = JsonDB.Load(dbFile);
+                var computedQuery = HasRange() ? ReplaceSequence(_baseQuery): _baseQuery;
+                var rootNode = Converter.ParseNodesFromQuery(computedQuery);
+                var schema = Converter.BuildSchema(rootNode);
+
+                var queryRequest = new GraphQLRequest(computedQuery);
+                var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
+                resultList = Converter.GetResultList(graphQLResponse.Data, schema["children"].AsArray());
+
+                // SAVE TO JSON FILE
+                console.Output.WriteLine("START SAVING...");
+                console.Output.WriteLine(resultList.ToJsonString());
+
+                if (firstRun)
+                {
+                    dbFile = CreateDataFile(rootNode);
+                    db = JsonDB.Load(dbFile);
+                }
+
+                Stopwatch sw = new Stopwatch();
+                sw.Start();
+
+                foreach (var item in resultList)
+                {
+                    db.Add(rootNode.Name.StringValue, item);
+                    db = JsonDB.Load(dbFile);
+                }
+
+                sw.Stop();
+                console.Output.WriteLine(sw.ElapsedMilliseconds);
+                firstRun = false;
+            }
+        }
+
+        private string ReplaceSequence(string query) 
+        {
+            if (_currentSequence == int.MinValue) 
+            {
+                _currentSequence = Convert.ToInt32(Start);
             }
 
-            sw.Stop();
-            console.Output.WriteLine(sw.ElapsedMilliseconds);
+            return query.Replace("$var", _currentSequence++.ToString());
+        }
+
+        private bool HasRange() 
+        {
+            int start, end;
+
+            if (string.IsNullOrEmpty(Start) || string.IsNullOrEmpty(End))
+                return false;
+
+            if (!int.TryParse(Start, out start))
+                return false;
+            if (!int.TryParse(End, out end))
+                return false;
+            if (_currentSequence == Convert.ToInt32(End))
+                return false;
+
+            return true;
         }
 
         private string CreateDataFile(CommonNode node)

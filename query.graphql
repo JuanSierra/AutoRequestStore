@@ -1,5 +1,5 @@
 query allPeople {
-	allPeople(first: 10) {
+	allPeople(first: $var) {
 		edges {
 			node {
 				name
