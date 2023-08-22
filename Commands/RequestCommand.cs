@@ -13,7 +13,6 @@ using System.Diagnostics;
 using System.Dynamic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace AutoRequestStore.Commands
 {
@@ -37,7 +36,7 @@ namespace AutoRequestStore.Commands
         // Name: --name
         // Short name: -n
         [CommandOption("name", 'n', Description = "Output file name.")]
-        public string Name { get; init; }
+        public string FileName { get; init; }
 
         // Name: --start
         // Short name: -s
@@ -82,7 +81,11 @@ namespace AutoRequestStore.Commands
 
                 if (firstRun)
                 {
-                    dbFile = CreateDataFile(rootNode);
+                    if (!string.IsNullOrEmpty(FileName) && File.Exists($"{FileName}.db"))
+                        dbFile = $"{FileName}.db";
+                    else
+                        dbFile = CreateDataFile(rootNode);
+
                     db = JsonDB.Load(dbFile);
                 }
 
@@ -107,8 +110,10 @@ namespace AutoRequestStore.Commands
             {
                 _currentSequence = Convert.ToInt32(Start);
             }
+            var new_query = query.Replace("$var", _currentSequence++.ToString());
+            Console.WriteLine(new_query);
 
-            return query.Replace("$var", _currentSequence++.ToString());
+            return new_query;
         }
 
         private bool HasRange() 
@@ -122,7 +127,7 @@ namespace AutoRequestStore.Commands
                 return false;
             if (!int.TryParse(End, out end))
                 return false;
-            if (_currentSequence == Convert.ToInt32(End))
+            if (_currentSequence > Convert.ToInt32(End))
                 return false;
 
             return true;
@@ -132,16 +137,16 @@ namespace AutoRequestStore.Commands
         {
             var collection = new JsonObject();
             var stamp = DateTime.Now.ToString("yMMddHHmmss");
-            var fileName = Name ?? $"data_{stamp}.db";
+            var fileName = FileName ?? $"data_{stamp}";
 
             collection.Add(node.Name.StringValue, new JsonArray());
 
-            using (var writer = File.CreateText(fileName)) 
+            using (var writer = File.CreateText($"{fileName}.db")) 
             {
                 writer.WriteLine(collection.ToJsonString());
             }
 
-            return fileName;
+            return $"{fileName}.db";
         }
     }
 }
