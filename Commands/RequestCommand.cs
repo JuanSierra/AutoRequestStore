@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using System.Dynamic;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -52,6 +53,8 @@ namespace AutoRequestStore.Commands
         private string _baseQuery;
         private readonly IGraphQLClient _client;
         private int _currentSequence = int.MinValue;
+        private DateTime _currentDate = DateTime.MinValue;
+        private bool _isNumericSequence;
 
         public RequestCommand(IGraphQLClient client)
         {
@@ -61,15 +64,24 @@ namespace AutoRequestStore.Commands
         public async ValueTask ExecuteAsync(IConsole console)
         {
             List<ExpandoObject> resultList = new List<ExpandoObject>();
-            var firstRun = true;
             string dbFile = null;
             JObject db = null;
 
-            while (HasRange() || firstRun) 
+            var computedQuery = HasRange() ? ReplaceSequence(_baseQuery) : _baseQuery;
+            var rootNode = Converter.ParseNodesFromQuery(computedQuery);
+            var schema = Converter.BuildSchema(rootNode);
+
+            if (!string.IsNullOrEmpty(FileName) && File.Exists($"{FileName}.db"))
+                dbFile = $"{FileName}.db";
+            else
+                dbFile = CreateDataFile(rootNode);
+
+
+            while (HasRange()) 
             {
-                var computedQuery = HasRange() ? ReplaceSequence(_baseQuery): _baseQuery;
-                var rootNode = Converter.ParseNodesFromQuery(computedQuery);
-                var schema = Converter.BuildSchema(rootNode);
+                computedQuery = HasRange() ? ReplaceSequence(_baseQuery): _baseQuery;
+                //var rootNode = Converter.ParseNodesFromQuery(computedQuery);
+                //var schema = Converter.BuildSchema(rootNode);
 
                 var queryRequest = new GraphQLRequest(computedQuery);
                 var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
@@ -79,15 +91,7 @@ namespace AutoRequestStore.Commands
                 console.Output.WriteLine("START SAVING...");
                 console.Output.WriteLine(resultList.ToJsonString());
 
-                if (firstRun)
-                {
-                    if (!string.IsNullOrEmpty(FileName) && File.Exists($"{FileName}.db"))
-                        dbFile = $"{FileName}.db";
-                    else
-                        dbFile = CreateDataFile(rootNode);
-
-                    db = JsonDB.Load(dbFile);
-                }
+                 db = JsonDB.Load(dbFile);
 
                 Stopwatch sw = new Stopwatch();
                 sw.Start();
@@ -100,18 +104,32 @@ namespace AutoRequestStore.Commands
 
                 sw.Stop();
                 console.Output.WriteLine(sw.ElapsedMilliseconds);
-                firstRun = false;
             }
         }
 
         private string ReplaceSequence(string query) 
         {
-            if (_currentSequence == int.MinValue) 
+            string new_query;
+
+            if (_isNumericSequence) 
             {
-                _currentSequence = Convert.ToInt32(Start);
+                if (_currentSequence == int.MinValue)
+                {
+                    _currentSequence = Convert.ToInt32(Start);
+                }
+
+                new_query = query.Replace("$var", _currentSequence++.ToString());
             }
-            var new_query = query.Replace("$var", _currentSequence++.ToString());
-            Console.WriteLine(new_query);
+            else
+            {
+                if (_currentDate == DateTime.MinValue)
+                {
+                    _currentDate = Convert.ToDateTime(Start);
+                }
+
+                new_query = query.Replace("$var", _currentDate.ToString("yyyy-MM-dd'T'HH:mm:ss.ffK", CultureInfo.InvariantCulture));
+                _currentDate.AddDays(1);
+            }
 
             return new_query;
         }
@@ -119,18 +137,44 @@ namespace AutoRequestStore.Commands
         private bool HasRange() 
         {
             int start, end;
+            DateTime startDate, endDate;
+            bool hasRange = true;
 
             if (string.IsNullOrEmpty(Start) || string.IsNullOrEmpty(End))
                 return false;
 
             if (!int.TryParse(Start, out start))
-                return false;
-            if (!int.TryParse(End, out end))
-                return false;
-            if (_currentSequence > Convert.ToInt32(End))
-                return false;
+                hasRange = false;
 
-            return true;
+            if (!int.TryParse(End, out end))
+                hasRange = false;
+
+            if (hasRange) // is numeric
+            {
+                _isNumericSequence = true;
+
+                if (end < start)
+                    throw new ArgumentException("Start value should be less than end value");
+
+                if (_currentSequence > Convert.ToInt32(End))
+                    return false;
+            }
+            else 
+            {
+                if (!DateTime.TryParse(Start, out startDate))
+                    hasRange = false;
+
+                if (!DateTime.TryParse(End, out endDate))
+                    hasRange = false;
+
+                if (endDate < startDate)
+                    throw new ArgumentException("Start value should be less than end value");
+
+                if (_currentDate > endDate)
+                    return false;
+            }
+
+            return hasRange;
         }
 
         private string CreateDataFile(CommonNode node)
