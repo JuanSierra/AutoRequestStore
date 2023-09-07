@@ -22,7 +22,17 @@ namespace AutoRequestStore.Commands
     {
         public RequestCommand(IOptions<ConnectionSettings> connection)
         {
-            _client = new GraphQLHttpClient(connection.Value.Endpoint, new SystemTextJsonSerializer());
+            GraphQLHttpClientOptions options = new GraphQLHttpClientOptions();
+            options.MediaType = "application/json";
+            options.EndPoint = new Uri(connection.Value.Endpoint);
+            
+            _client = new GraphQLHttpClient(options, new SystemTextJsonSerializer());
+            if(!string.IsNullOrEmpty(connection.Value.Authz))
+                _client.HttpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {connection.Value.Authz}");
+            
+            //_client.SendMutationAsync()
+            //_client..Add("Authorization", $"bearer {ApiKey}");
+
             _baseQuery = File.ReadAllText(connection.Value.Query);
         }
 
@@ -51,15 +61,11 @@ namespace AutoRequestStore.Commands
 
 
         private string _baseQuery;
-        private readonly IGraphQLClient _client;
+        private readonly GraphQLHttpClient _client;
         private int _currentSequence = int.MinValue;
         private DateTime _currentDate = DateTime.MinValue;
         private bool _isNumericSequence;
 
-        public RequestCommand(IGraphQLClient client)
-        {
-            _client = client;
-        }
 
         public async ValueTask ExecuteAsync(IConsole console)
         {
@@ -76,14 +82,19 @@ namespace AutoRequestStore.Commands
             else
                 dbFile = CreateDataFile(rootNode);
 
+            console.ReadKey();
 
-            while (HasRange()) 
+            console.Output.WriteLine(schema.ToJsonString());
+
+            do
             {
-                computedQuery = HasRange() ? ReplaceSequence(_baseQuery): _baseQuery;
+                computedQuery = HasRange() ? ReplaceSequence(_baseQuery) : _baseQuery;
                 //var rootNode = Converter.ParseNodesFromQuery(computedQuery);
                 //var schema = Converter.BuildSchema(rootNode);
 
                 var queryRequest = new GraphQLRequest(computedQuery);
+                //_client
+                //_client.SendMutationAsync()
                 var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
                 resultList = Converter.GetResultList(graphQLResponse.Data, schema["children"].AsArray());
 
@@ -91,7 +102,7 @@ namespace AutoRequestStore.Commands
                 console.Output.WriteLine("START SAVING...");
                 console.Output.WriteLine(resultList.ToJsonString());
 
-                 db = JsonDB.Load(dbFile);
+                db = JsonDB.Load(dbFile);
 
                 Stopwatch sw = new Stopwatch();
                 sw.Start();
@@ -104,7 +115,7 @@ namespace AutoRequestStore.Commands
 
                 sw.Stop();
                 console.Output.WriteLine(sw.ElapsedMilliseconds);
-            }
+            } while (HasRange());
         }
 
         private string ReplaceSequence(string query) 

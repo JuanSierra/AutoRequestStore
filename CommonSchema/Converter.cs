@@ -4,6 +4,7 @@ using GraphQLParser.AST;
 using System.Dynamic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Xml.Linq;
 
 namespace AutoRequestStore.CommonSchema
 {
@@ -38,7 +39,6 @@ namespace AutoRequestStore.CommonSchema
 
         public static List<ExpandoObject> GetResultList(JsonElement element, JsonArray structure)
         {
-            var cont = true;
             List<ExpandoObject> arr = new List<ExpandoObject>();
             JsonNode n;
             var obj = structure[0].AsObject();
@@ -78,13 +78,26 @@ namespace AutoRequestStore.CommonSchema
         static ExpandoObject MapToEntity(JsonArray schemaArray, JsonElement entity)
         {
             var obj = new ExpandoObject() as IDictionary<string, object>;
+            int nodeIndex = 0;
 
             foreach (var item in schemaArray)
             {
                 var prop = item["name"].ToString();
                 var val = entity.GetProperty(prop);
 
-                obj.Add(prop, val.GetString());
+                if (val.ValueKind == JsonValueKind.String)
+                    obj.Add(prop, val.GetString());
+                else if (val.ValueKind == JsonValueKind.Number)
+                    obj.Add(prop, val.GetDecimal());
+                else if (val.ValueKind == JsonValueKind.Object)
+                {
+                    var objNode = schemaArray[nodeIndex].AsObject();
+                    var arr = GetResultList(val, objNode["children"].AsArray());
+
+                    obj.Add(prop, arr);
+                }
+
+                nodeIndex++;
             }
 
             return (ExpandoObject)obj;
