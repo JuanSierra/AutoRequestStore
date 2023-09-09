@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace AutoRequestStore.CommonSchema
 {
-    internal class CommonName
+    internal class NodeName
     {
         public string StringValue { get; set; }
     }

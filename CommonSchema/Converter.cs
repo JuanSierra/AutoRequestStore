@@ -4,10 +4,15 @@ using GraphQLParser.AST;
 using System.Dynamic;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Xml.Linq;
 
 namespace AutoRequestStore.CommonSchema
 {
+    public class Constants 
+    {
+        public const string NODE_NAME = "name";
+        public const string CHILDREN_NAME = "children";
+    }
+
     internal class Converter
     {
         public static CommonNode ParseNodesFromQuery(string query)
@@ -42,18 +47,18 @@ namespace AutoRequestStore.CommonSchema
             List<ExpandoObject> arr = new List<ExpandoObject>();
             JsonNode n;
             var obj = structure[0].AsObject();
-            var hasChildren = obj.TryGetPropertyValue("children", out n);
+            var hasChildren = obj.TryGetPropertyValue(Constants.CHILDREN_NAME, out n);
 
             if (hasChildren)
             {
-                var name = obj["name"].GetValue<string>();
-                var arr2 = obj["children"].AsArray();
+                var name = obj[Constants.NODE_NAME].GetValue<string>();
+                var arr2 = obj[Constants.CHILDREN_NAME].AsArray();
 
                 if (element.ValueKind == JsonValueKind.Object)
                 {
                     //TODO: change to element.TryGetProperty for check query correspond with schema
                     var r = element.GetProperty(name);
-                    arr = GetResultList(r, obj["children"].AsArray());
+                    arr = GetResultList(r, obj[Constants.CHILDREN_NAME].AsArray());
                 }
                 else
                 {
@@ -82,7 +87,7 @@ namespace AutoRequestStore.CommonSchema
 
             foreach (var item in schemaArray)
             {
-                var prop = item["name"].ToString();
+                var prop = item[Constants.NODE_NAME].ToString();
                 var val = entity.GetProperty(prop);
 
                 if (val.ValueKind == JsonValueKind.String)
@@ -92,7 +97,7 @@ namespace AutoRequestStore.CommonSchema
                 else if (val.ValueKind == JsonValueKind.Object)
                 {
                     var objNode = schemaArray[nodeIndex].AsObject();
-                    var arr = GetResultList(val, objNode["children"].AsArray());
+                    var arr = GetResultList(val, objNode[Constants.CHILDREN_NAME].AsArray());
 
                     obj.Add(prop, arr);
                 }
@@ -107,7 +112,7 @@ namespace AutoRequestStore.CommonSchema
         static JsonObject GetInnerSelection(CommonNode node, JsonObject innerStructure)
         {
             var n = new JsonObject();
-            n.Add("name", node.Name.StringValue);
+            n.Add(Constants.NODE_NAME, node.Name.StringValue);
 
             if (node.Kind == 2)
             {
@@ -117,13 +122,14 @@ namespace AutoRequestStore.CommonSchema
             if (node.SelectionSet is not null && node.SelectionSet.Selections.Count > 0)
             {
                 var children = new JsonArray();
+                JsonObject inner = new JsonObject();
                 foreach (var item in node.SelectionSet.Selections)
                 {
-                    var child = GetInnerSelection(item, innerStructure);
+                    var child = GetInnerSelection(item, inner);
                     children.Add(child);
                 }
 
-                n.Add("children", children);
+                n.Add(Constants.CHILDREN_NAME, children);
             }
             else
             {

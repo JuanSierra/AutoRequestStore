@@ -4,7 +4,6 @@ using CliFx.Attributes;
 using CliFx.Infrastructure;
 using CSJsonDB;
 using GraphQL;
-using GraphQL.Client.Abstractions;
 using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.SystemTextJson;
 using Microsoft.Extensions.Options;
@@ -42,7 +41,7 @@ namespace AutoRequestStore.Commands
         // Name: --interval
         // Short name: -i
         [CommandOption("interval", 'i', Description = "Interval in milliseconds.")]
-        public double Interval { get; init; } = 1000;
+        public int Interval { get; init; } = 1000;
 
         // Name: --name
         // Short name: -n
@@ -73,7 +72,7 @@ namespace AutoRequestStore.Commands
             string dbFile = null;
             JObject db = null;
 
-            var computedQuery = HasRange() ? ReplaceSequence(_baseQuery) : _baseQuery;
+            var computedQuery = HasRange() ? ReplaceSequence(_baseQuery, false) : _baseQuery;
             var rootNode = Converter.ParseNodesFromQuery(computedQuery);
             var schema = Converter.BuildSchema(rootNode);
 
@@ -82,21 +81,16 @@ namespace AutoRequestStore.Commands
             else
                 dbFile = CreateDataFile(rootNode);
 
-            console.ReadKey();
 
             console.Output.WriteLine(schema.ToJsonString());
 
             do
             {
                 computedQuery = HasRange() ? ReplaceSequence(_baseQuery) : _baseQuery;
-                //var rootNode = Converter.ParseNodesFromQuery(computedQuery);
-                //var schema = Converter.BuildSchema(rootNode);
 
                 var queryRequest = new GraphQLRequest(computedQuery);
-                //_client
-                //_client.SendMutationAsync()
                 var graphQLResponse = await _client.SendQueryAsync<JsonElement>(queryRequest);
-                resultList = Converter.GetResultList(graphQLResponse.Data, schema["children"].AsArray());
+                resultList = Converter.GetResultList(graphQLResponse.Data, schema[Constants.CHILDREN_NAME].AsArray());
 
                 // SAVE TO JSON FILE
                 console.Output.WriteLine("START SAVING...");
@@ -118,7 +112,7 @@ namespace AutoRequestStore.Commands
             } while (HasRange());
         }
 
-        private string ReplaceSequence(string query) 
+        private string ReplaceSequence(string query, bool increase = true) 
         {
             string new_query;
 
@@ -129,7 +123,8 @@ namespace AutoRequestStore.Commands
                     _currentSequence = Convert.ToInt32(Start);
                 }
 
-                new_query = query.Replace("$var", _currentSequence++.ToString());
+                new_query = query.Replace("$var", _currentSequence.ToString());
+                if (increase) _currentSequence++;
             }
             else
             {
@@ -138,8 +133,8 @@ namespace AutoRequestStore.Commands
                     _currentDate = Convert.ToDateTime(Start);
                 }
 
-                new_query = query.Replace("$var", _currentDate.ToString("yyyy-MM-dd'T'HH:mm:ss.ffK", CultureInfo.InvariantCulture));
-                _currentDate.AddDays(1);
+                new_query = query.Replace("$var", _currentDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                if (increase) _currentDate = _currentDate.AddDays(1);
             }
 
             return new_query;
@@ -169,20 +164,26 @@ namespace AutoRequestStore.Commands
 
                 if (_currentSequence > Convert.ToInt32(End))
                     return false;
+
+                Thread.Sleep(Interval);
             }
             else 
             {
+                hasRange = true;
+
                 if (!DateTime.TryParse(Start, out startDate))
-                    hasRange = false;
+                    return false;
 
                 if (!DateTime.TryParse(End, out endDate))
-                    hasRange = false;
+                    return false;
 
                 if (endDate < startDate)
                     throw new ArgumentException("Start value should be less than end value");
 
                 if (_currentDate > endDate)
                     return false;
+
+                Thread.Sleep(Interval);
             }
 
             return hasRange;
